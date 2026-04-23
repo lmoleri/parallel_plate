@@ -145,4 +145,4 @@ They use this JSON schema:
 
 The executable classifies arrivals geometrically at the arrival boundary. For `ComponentAnalyticField`, Garfield can report a plate crossing either as `StatusHitPlane` or as `StatusLeftDriftMedium` with an endpoint on the plate boundary, so the analysis accepts both cases when the endpoint is at `x = d` within a small tolerance. Mean arrival energy is therefore defined over successfully arriving electrons only, while multiplicity is defined per primary and includes zero-arrival events.
 
-For low-pressure microscopic transport, the runner automatically switches to Runge-Kutta-Nystrom stepping for pressures at or below `100 Torr`. This stabilizes near-ballistic trajectories in the `300 nm`, `200 kV/cm` regime and prevents the null-collision sampler from driving the transport to unphysical energies before the electron reaches the arrival plate.
+The runner uses Runge-Kutta-Nystrom stepping for this nanoscale parallel-plate study. This avoids a Garfield microscopic-stepping artifact where the endpoint energy can be overestimated if a track crosses the arrival plane before the next sampled collision point.

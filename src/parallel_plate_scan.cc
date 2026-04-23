@@ -48,7 +48,6 @@ constexpr double kKvPerCmToVPerCm = 1.e3;
 constexpr double kDefaultTemperatureK = 293.15;
 constexpr double kDefaultInitialElectronEnergyEv = 0.1;
 constexpr double kDefaultMaxElectronEnergyEv = 200.;
-constexpr double kLowPressureRknThresholdTorr = 100.;
 
 enum class EnergyRangeMode { Fixed, DynamicMax };
 
@@ -802,12 +801,11 @@ PointData RunScanPoint(const Config& config, const ScanPoint& point,
 
   AvalancheMicroscopic avalanche(&sensor);
   avalanche.EnableSignalCalculation(false);
-  if (point.pressureTorr <= kLowPressureRknThresholdTorr) {
-    // Use RKN stepping in the low-pressure regime so near-ballistic electrons
-    // can terminate on the plate boundary before the null-collision sampler
-    // drives the transport to unphysical energies.
-    avalanche.EnableRKNSteps(true);
-  }
+  // Always use RKN stepping in this nanoscale parallel-plate study.
+  // Garfield's default microscopic stepper evaluates the endpoint energy at the
+  // next sampled collision and can therefore overestimate the energy when the
+  // track crosses the arrival plane before that collision occurs.
+  avalanche.EnableRKNSteps(true);
   if (config.simulation.avalancheSizeLimit > 0) {
     avalanche.EnableAvalancheSizeLimit(config.simulation.avalancheSizeLimit);
   }
@@ -1111,7 +1109,8 @@ void WriteRunManifest(const fs::path& metadataPath, const fs::path& configPath,
         {"pressure_torr", config.scan.pressureTorr},
         {"field_kv_per_cm", config.scan.fieldKvPerCm}}},
       {"transport",
-       {{"low_pressure_rkn_threshold_torr", kLowPressureRknThresholdTorr}}},
+       {{"microscopic_stepper", "rkn"},
+        {"rkn_reason", "accurate_plane_crossing_endpoint_energy"}}},
       {"artifacts",
        {{"root_file", "parallel_plate_scan.root"},
         {"summary_csv", "scan_summary.csv"},

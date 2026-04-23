@@ -4,6 +4,7 @@
 #include <TGraphErrors.h>
 #include <TH1.h>
 #include <TH1D.h>
+#include <TPad.h>
 #include <TROOT.h>
 #include <TStyle.h>
 #include <TRandom.h>
@@ -47,6 +48,9 @@ constexpr double kKvPerCmToVPerCm = 1.e3;
 constexpr double kDefaultTemperatureK = 293.15;
 constexpr double kDefaultInitialElectronEnergyEv = 0.1;
 constexpr double kDefaultMaxElectronEnergyEv = 200.;
+constexpr double kLowPressureRknThresholdTorr = 100.;
+
+enum class EnergyRangeMode { Fixed, DynamicMax };
 
 struct CliOptions {
   fs::path configPath{"config/default_parallel_plate.json"};
@@ -82,6 +86,7 @@ struct SimulationConfig {
 struct HistogramConfig {
   int energyBins = 200;
   int multiplicityBinsMin = 20;
+  EnergyRangeMode energyRangeMode = EnergyRangeMode::Fixed;
 };
 
 struct Config {
@@ -165,6 +170,24 @@ std::string ToLower(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return value;
+}
+
+std::string EnergyRangeModeToString(const EnergyRangeMode mode) {
+  switch (mode) {
+    case EnergyRangeMode::Fixed:
+      return "fixed";
+    case EnergyRangeMode::DynamicMax:
+      return "dynamic_max";
+  }
+  return "fixed";
+}
+
+EnergyRangeMode ParseEnergyRangeMode(const std::string& text) {
+  const std::string mode = ToLower(text);
+  if (mode == "fixed") return EnergyRangeMode::Fixed;
+  if (mode == "dynamic_max") return EnergyRangeMode::DynamicMax;
+  throw std::runtime_error(
+      "histogram.energy_range_mode must be 'fixed' or 'dynamic_max'.");
 }
 
 std::string FormatNumber(const double value, const int precision = 6) {
@@ -267,6 +290,15 @@ bool ReadOptionalBool(const json& object, const std::string_view section,
   if (!value) return fallback;
   if (!value->is_boolean()) ThrowJsonTypeError({section, key}, "a boolean");
   return value->get<bool>();
+}
+
+std::string ReadOptionalString(const json& object, const std::string_view section,
+                               const std::string_view key,
+                               const std::string& fallback) {
+  const auto* value = FindObjectMember(object, key, {section, key});
+  if (!value) return fallback;
+  if (!value->is_string()) ThrowJsonTypeError({section, key}, "a string");
+  return value->get<std::string>();
 }
 
 std::vector<double> ReadOptionalDoubleArray(const json& object,
@@ -441,6 +473,9 @@ Config LoadConfig(const fs::path& configPath) {
     config.histogram.multiplicityBinsMin =
         ReadOptionalInt(*histogram, "histogram", "multiplicity_bins_min",
                         config.histogram.multiplicityBinsMin);
+    config.histogram.energyRangeMode = ParseEnergyRangeMode(ReadOptionalString(
+        *histogram, "histogram", "energy_range_mode",
+        EnergyRangeModeToString(config.histogram.energyRangeMode)));
   }
 
   if (config.baseline.distanceNm <= 0.) {
@@ -657,8 +692,14 @@ PointSummary SummarisePoint(const ScanPoint& point, const Config& config,
 
 TH1D MakeEnergyHistogram(const std::string& name, const Config& config,
                          const std::vector<double>& energies) {
-  TH1D histogram(name.c_str(), "", config.histogram.energyBins, 0.,
-                 config.simulation.maxElectronEnergyEv);
+  double upperEdge = config.simulation.maxElectronEnergyEv;
+  if (config.histogram.energyRangeMode == EnergyRangeMode::DynamicMax &&
+      !energies.empty()) {
+    const auto maxEnergy =
+        *std::max_element(energies.begin(), energies.end());
+    upperEdge = std::max(1.e-6, 1.05 * maxEnergy);
+  }
+  TH1D histogram(name.c_str(), "", config.histogram.energyBins, 0., upperEdge);
   histogram.SetDirectory(nullptr);
   histogram.SetTitle("Arrival electron energy;Final electron energy [eV];Count");
   for (const double energy : energies) histogram.Fill(energy);
@@ -761,6 +802,12 @@ PointData RunScanPoint(const Config& config, const ScanPoint& point,
 
   AvalancheMicroscopic avalanche(&sensor);
   avalanche.EnableSignalCalculation(false);
+  if (point.pressureTorr <= kLowPressureRknThresholdTorr) {
+    // Use RKN stepping in the low-pressure regime so near-ballistic electrons
+    // can terminate on the plate boundary before the null-collision sampler
+    // drives the transport to unphysical energies.
+    avalanche.EnableRKNSteps(true);
+  }
   if (config.simulation.avalancheSizeLimit > 0) {
     avalanche.EnableAvalancheSizeLimit(config.simulation.avalancheSizeLimit);
   }
@@ -949,8 +996,10 @@ void WriteSummaryGraphs(const std::vector<PointSummary>& summaries, TDirectory* 
   TCanvas canvas(("c_summary_" + scanKey).c_str(), scanKey.c_str(), 1200, 500);
   canvas.Divide(2, 1);
   canvas.cd(1);
+  if (scanKey == "pressure") gPad->SetLogx();
   energyGraph.Draw("APL");
   canvas.cd(2);
+  if (scanKey == "pressure") gPad->SetLogx();
   multiplicityGraph.Draw("APL");
   canvas.SaveAs(outputPath.string().c_str());
 }
@@ -1023,7 +1072,9 @@ json ConfigToJson(const Config& config) {
         {"temperature_k", config.simulation.temperatureK}}},
       {"histogram",
        {{"energy_bins", config.histogram.energyBins},
-        {"multiplicity_bins_min", config.histogram.multiplicityBinsMin}}}};
+        {"multiplicity_bins_min", config.histogram.multiplicityBinsMin},
+        {"energy_range_mode",
+         EnergyRangeModeToString(config.histogram.energyRangeMode)}}}};
 }
 
 void WriteJsonFile(const fs::path& path, const json& payload) {
@@ -1059,6 +1110,8 @@ void WriteRunManifest(const fs::path& metadataPath, const fs::path& configPath,
        {{"distance_nm", config.scan.distanceNm},
         {"pressure_torr", config.scan.pressureTorr},
         {"field_kv_per_cm", config.scan.fieldKvPerCm}}},
+      {"transport",
+       {{"low_pressure_rkn_threshold_torr", kLowPressureRknThresholdTorr}}},
       {"artifacts",
        {{"root_file", "parallel_plate_scan.root"},
         {"summary_csv", "scan_summary.csv"},

@@ -28,6 +28,7 @@
   },
   "histogram": {
     "energy_bins": 50,
-    "multiplicity_bins_min": 10
+    "multiplicity_bins_min": 10,
+    "energy_range_mode": "fixed"
   }
 }

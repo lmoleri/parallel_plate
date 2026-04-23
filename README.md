@@ -72,6 +72,15 @@ Run a single scan:
 ./build/parallel_plate_scan --scan field --out results
 ```
 
+Run the dedicated low-pressure pressure scan down to `0.02 Torr`:
+
+```bash
+./build/parallel_plate_scan \
+  --config config/pressure_scan_0p02_to_760_torr.json \
+  --scan p \
+  --out results
+```
+
 ## Outputs
 
 The `--out` argument is the parent directory for results. The executable always creates a deterministic parameter-based run subfolder inside it, for example:
@@ -94,6 +103,7 @@ The shipped configs are:
 
 - `config/default_parallel_plate.json`
 - `config/smoke_parallel_plate.json`
+- `config/pressure_scan_0p02_to_760_torr.json`
 
 They use this JSON schema:
 
@@ -122,9 +132,17 @@ They use this JSON schema:
   },
   "histogram": {
     "energy_bins": 200,
-    "multiplicity_bins_min": 20
+    "multiplicity_bins_min": 20,
+    "energy_range_mode": "fixed"
   }
 }
 ```
 
+`histogram.energy_range_mode` accepts:
+
+- `"fixed"`: use `simulation.max_electron_energy_ev` as the energy-histogram upper edge
+- `"dynamic_max"`: set the energy-histogram upper edge separately for each scan point to `1.05 * max(arrival_energy_ev)` and fall back to `simulation.max_electron_energy_ev` if no electrons arrive
+
 The executable classifies arrivals geometrically at the arrival boundary. For `ComponentAnalyticField`, Garfield can report a plate crossing either as `StatusHitPlane` or as `StatusLeftDriftMedium` with an endpoint on the plate boundary, so the analysis accepts both cases when the endpoint is at `x = d` within a small tolerance. Mean arrival energy is therefore defined over successfully arriving electrons only, while multiplicity is defined per primary and includes zero-arrival events.
+
+For low-pressure microscopic transport, the runner automatically switches to Runge-Kutta-Nystrom stepping for pressures at or below `100 Torr`. This stabilizes near-ballistic trajectories in the `300 nm`, `200 kV/cm` regime and prevents the null-collision sampler from driving the transport to unphysical energies before the electron reaches the arrival plate.

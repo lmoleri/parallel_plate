@@ -1,0 +1,33 @@
+{
+  "baseline": {
+    "distance_nm": 300.0,
+    "pressure_torr": 760.0,
+    "field_kv_per_cm": 200.0
+  },
+  "scan": {
+    "distance_nm": [
+      300.0
+    ],
+    "pressure_torr": [
+      760.0
+    ],
+    "field_kv_per_cm": [
+      200.0
+    ]
+  },
+  "gas": {
+    "enable_penning": true,
+    "enable_thermal_motion": true
+  },
+  "simulation": {
+    "num_primaries": 5,
+    "initial_electron_energy_ev": 0.1,
+    "max_electron_energy_ev": 200.0,
+    "avalanche_size_limit": 10000,
+    "temperature_k": 293.15
+  },
+  "histogram": {
+    "energy_bins": 50,
+    "multiplicity_bins_min": 10
+  }
+}

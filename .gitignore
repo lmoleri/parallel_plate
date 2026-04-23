@@ -1,0 +1,8 @@
+.DS_Store
+build/
+results/
+cmake-build-*/
+local/
+vendor/
+.idea/
+.vscode/
